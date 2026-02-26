@@ -5,7 +5,7 @@ This guide covers deploying two Cloud Run services:
 | Service | Purpose | Access |
 |---------|---------|--------|
 | `schwab-mcp` | Remote MCP server (Streamable HTTP + OAuth) | Public (OAuth-protected) |
-| `schwab-mcp-admin` | Admin UI for Schwab token re-authentication | IAM-protected |
+| `schwab-mcp-admin` | Admin UI for Schwab token re-authentication | Public (URL-only) |
 
 Both services connect to a shared Cloud SQL Postgres database. Secrets are stored in Google Secret Manager.
 
@@ -117,27 +117,16 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --role="roles/secretmanager.secretAccessor"
 ```
 
-### Admin Service IAM Access Control
+### Admin Service Access
 
-The admin service is deployed with `--no-allow-unauthenticated`. Access is controlled entirely by Cloud Run IAM — there is no application-level password layer.
+The admin service is deployed with `--allow-unauthenticated`. This is required because the Schwab OAuth callback redirects the browser to `/datareceived` on the admin service, and Cloud Run's IAM layer would block this unauthenticated redirect with a 403.
 
-Grant `roles/run.invoker` to specific users who need admin access:
+This is acceptable because:
+- The admin dashboard only shows token status (not the token itself)
+- Initiating a Schwab re-auth still requires valid Schwab credentials
+- The `/datareceived` callback requires a valid Schwab authorization code
 
-```bash
-# Grant access to a specific user
-gcloud run services add-iam-policy-binding schwab-mcp-admin \
-    --region="$REGION" \
-    --member="user:you@example.com" \
-    --role="roles/run.invoker" \
-    --project="$PROJECT_ID"
-
-# Or grant access to a Google Group
-gcloud run services add-iam-policy-binding schwab-mcp-admin \
-    --region="$REGION" \
-    --member="group:team@example.com" \
-    --role="roles/run.invoker" \
-    --project="$PROJECT_ID"
-```
+The admin URL is not publicly advertised. If you want additional protection, consider adding application-level authentication.
 
 ## 4. Deploy Services
 
@@ -282,25 +271,10 @@ https://<ADMIN_SERVICE_URL>/datareceived
 
 After deployment, you need to complete the Schwab OAuth flow once to seed the token.
 
-### Option A: Access via IAM-Authenticated Browser
-
-If you have `roles/run.invoker` on the admin service, navigate to `https://<ADMIN_DOMAIN>` (or the Cloud Run-assigned URL) in a browser where you're signed into the authorized Google account. Cloud Run's IAP handles authentication automatically.
-
-### Option B: Proxy Locally
-
-```bash
-gcloud run services proxy schwab-mcp-admin \
-    --region="$REGION" \
-    --project="$PROJECT_ID"
-# Opens http://localhost:8080 with IAM credentials
-```
-
-### Complete the Flow
-
-1. Visit the admin dashboard
+1. Navigate to `https://<ADMIN_DOMAIN>` (or the Cloud Run-assigned URL) in your browser
 2. Click **"Start Schwab Auth"**
 3. Log in to Schwab and authorize the app
-4. After redirect, the token is written to the shared Postgres database
+4. After redirect to `/datareceived`, the token is written to the shared Postgres database
 5. The MCP server picks up the token automatically
 
 The Schwab refresh token expires every ~7 days. Repeat this flow when the admin dashboard shows "Refresh: Likely Expired".
@@ -366,7 +340,7 @@ gcloud run services logs read schwab-mcp \
 |---------|-------|-----|
 | MCP tools return errors about expired token | Schwab refresh token expired (>7 days) | Re-auth via admin dashboard |
 | `Cloud SQL connection failed` | Missing `roles/cloudsql.client` or wrong instance name | Verify IAM bindings and `DB_INSTANCE` value |
-| `403 Forbidden` on admin service | User lacks `roles/run.invoker` | Grant the IAM role (see §3) |
+| `403 Forbidden` on admin callback | Admin service deployed with `--no-allow-unauthenticated` | Redeploy with `--allow-unauthenticated` (see §3) |
 | `SCHWAB_CALLBACK_URL is required` | Missing env var on admin service | Update with `gcloud run services update` |
 | Domain mapping stuck on "pending" | DNS not propagated | Verify CNAME record points to `ghs.googlehosted.com` |
 | OAuth callback fails after portal update | Schwab hasn't activated the new callback URL | Wait until after market close |
