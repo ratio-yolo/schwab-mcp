@@ -63,7 +63,7 @@ RUN uv pip install --system --no-cache -r /tmp/dist/requirements.txt \
     && uv pip install --system --no-cache /tmp/dist/*.whl \
     && rm -rf /tmp/dist
 
-RUN useradd -r -s /usr/sbin/nologin appuser
+RUN useradd -r -m -s /usr/sbin/nologin appuser
 USER appuser
 
 LABEL org.opencontainers.image.title="Schwab MCP Remote Server" \
