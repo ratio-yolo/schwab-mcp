@@ -1,5 +1,10 @@
 # Repository Guidelines
 
+## Git & PRs
+
+- This is a **fork** of `jkoelker/schwab-mcp`. Never create PRs against the upstream repo.
+- Always target `ratio-yolo/schwab-mcp` when creating PRs (use `--repo ratio-yolo/schwab-mcp` or rely on the `gh repo set-default`).
+
 ## Project Structure
 
 ```
