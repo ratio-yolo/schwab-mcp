@@ -16,6 +16,7 @@ from typing import Any, Callable
 from mcp.server.auth.routes import create_auth_routes
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 from schwab import auth as schwab_auth
 from schwab.client import AsyncClient
@@ -130,10 +131,18 @@ def create_mcp_server(
 
         result_transform = _toon_transform
 
+    # Extract hostname from SERVER_URL for DNS rebinding protection
+    from urllib.parse import urlparse
+
+    server_host = urlparse(config.server_url).hostname or "localhost"
+
     mcp = FastMCP(
         "schwab-mcp",
         stateless_http=True,
         json_response=True,
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[server_host],
+        ),
         lifespan=_client_lifespan(
             schwab_client,
             approval_manager,
@@ -241,9 +250,10 @@ def create_app(config: RemoteServerConfig) -> Starlette:
             db_manager=db_manager,
         )
 
-        # Mount the MCP streamable HTTP app
+        # Mount the MCP streamable HTTP app at root; the inner app
+        # registers its route at /mcp (the default streamable_http_path).
         mcp_app = mcp_server.streamable_http_app()
-        app.routes.append(Mount("/mcp", app=mcp_app))
+        app.routes.append(Mount("/", app=mcp_app))
 
         async with mcp_server.session_manager.run():
             try:
