@@ -138,7 +138,7 @@ deploy_admin() {
         --source . \
         --project "$PROJECT_ID" \
         --region "$REGION" \
-        --no-allow-unauthenticated \
+        --allow-unauthenticated \
         --port 8080 \
         --memory 256Mi \
         --timeout 60 \
