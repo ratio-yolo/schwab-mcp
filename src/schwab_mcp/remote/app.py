@@ -133,6 +133,7 @@ def create_mcp_server(
     mcp = FastMCP(
         "schwab-mcp",
         stateless_http=True,
+        streamable_http_path="/",
         json_response=True,
         lifespan=_client_lifespan(
             schwab_client,
