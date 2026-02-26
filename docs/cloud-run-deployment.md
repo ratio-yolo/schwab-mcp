@@ -119,14 +119,9 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 
 ### Admin Service Access
 
-The admin service is deployed with `--allow-unauthenticated`. This is required because the Schwab OAuth callback redirects the browser to `/datareceived` on the admin service, and Cloud Run's IAM layer would block this unauthenticated redirect with a 403.
+The admin service is deployed with `--no-allow-unauthenticated`. Access is controlled by Cloud Run IAM.
 
-This is acceptable because:
-- The admin dashboard only shows token status (not the token itself)
-- Initiating a Schwab re-auth still requires valid Schwab credentials
-- The `/datareceived` callback requires a valid Schwab authorization code
-
-The admin URL is not publicly advertised. If you want additional protection, consider adding application-level authentication.
+The Schwab OAuth callback redirects the browser to `/datareceived` on the admin service, which requires public access to work. The `schwab-auth.sh` script handles this by temporarily granting public access for the duration of the auth flow, then revoking it automatically (see [§7](#7-token-setuprefresh)).
 
 ## 4. Deploy Services
 
@@ -267,17 +262,22 @@ https://<ADMIN_SERVICE_URL>/datareceived
 
 > **Note:** Schwab callback URL changes typically only take effect after market close. Plan accordingly.
 
-## 7. First-Time Token Setup
+## 7. Token Setup/Refresh
 
-After deployment, you need to complete the Schwab OAuth flow once to seed the token.
+After deployment (and every ~7 days when the Schwab refresh token expires), run:
 
-1. Navigate to `https://<ADMIN_DOMAIN>` (or the Cloud Run-assigned URL) in your browser
-2. Click **"Start Schwab Auth"**
-3. Log in to Schwab and authorize the app
-4. After redirect to `/datareceived`, the token is written to the shared Postgres database
-5. The MCP server picks up the token automatically
+```bash
+./schwab-auth.sh
+```
 
-The Schwab refresh token expires every ~7 days. Repeat this flow when the admin dashboard shows "Refresh: Likely Expired".
+This script:
+1. Temporarily grants public access to the admin service
+2. Opens the admin dashboard in your browser
+3. You click **"Start Schwab Auth"** and log in to Schwab
+4. After redirect to `/datareceived`, the token is written to Postgres
+5. The script detects the token and revokes public access automatically
+
+The script has a 5-minute timeout — if auth isn't completed, access is revoked on exit (including Ctrl+C).
 
 ## 8. Connecting claude.ai
 
@@ -340,7 +340,7 @@ gcloud run services logs read schwab-mcp \
 |---------|-------|-----|
 | MCP tools return errors about expired token | Schwab refresh token expired (>7 days) | Re-auth via admin dashboard |
 | `Cloud SQL connection failed` | Missing `roles/cloudsql.client` or wrong instance name | Verify IAM bindings and `DB_INSTANCE` value |
-| `403 Forbidden` on admin callback | Admin service deployed with `--no-allow-unauthenticated` | Redeploy with `--allow-unauthenticated` (see §3) |
+| `403 Forbidden` on admin callback | Admin service requires IAM auth | Use `./schwab-auth.sh` to temporarily open access (see §7) |
 | `SCHWAB_CALLBACK_URL is required` | Missing env var on admin service | Update with `gcloud run services update` |
 | Domain mapping stuck on "pending" | DNS not propagated | Verify CNAME record points to `ghs.googlehosted.com` |
 | OAuth callback fails after portal update | Schwab hasn't activated the new callback URL | Wait until after market close |
