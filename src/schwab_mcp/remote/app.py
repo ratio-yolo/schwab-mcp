@@ -133,7 +133,6 @@ def create_mcp_server(
     mcp = FastMCP(
         "schwab-mcp",
         stateless_http=True,
-        streamable_http_path="/",
         json_response=True,
         lifespan=_client_lifespan(
             schwab_client,
@@ -242,9 +241,10 @@ def create_app(config: RemoteServerConfig) -> Starlette:
             db_manager=db_manager,
         )
 
-        # Mount the MCP streamable HTTP app
+        # Mount the MCP streamable HTTP app at root; the inner app
+        # registers its route at /mcp (the default streamable_http_path).
         mcp_app = mcp_server.streamable_http_app()
-        app.routes.append(Mount("/mcp", app=mcp_app))
+        app.routes.append(Mount("/", app=mcp_app))
 
         async with mcp_server.session_manager.run():
             try:
