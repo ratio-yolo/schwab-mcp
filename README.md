@@ -170,6 +170,10 @@ Set `GOOGLE_APPLICATION_CREDENTIALS` environment variable to authenticate to Clo
 
 For running as a remote MCP server on Google Cloud Run (with OAuth for claude.ai), see the [Cloud Run Deployment Guide](docs/cloud-run-deployment.md).
 
+**Key scripts:**
+- `deploy.sh` — Deploy both services to Cloud Run
+- `schwab-auth.sh` — Refresh the Schwab token (temporarily opens the admin service, completes OAuth, then locks it back down automatically)
+
 ### Container Usage
 
 A Docker/Podman image is available at `ghcr.io/jkoelker/schwab-mcp`.

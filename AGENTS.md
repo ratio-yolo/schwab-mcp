@@ -47,6 +47,8 @@ src/schwab_mcp/
 docs/
   discord-setup.md    # Discord approval bot setup
   cloud-run-deployment.md  # Cloud Run deployment guide
+deploy.sh             # Cloud Run deployment script (both services)
+schwab-auth.sh        # Temporary-access Schwab OAuth flow (opens admin, auto-revokes)
 tests/
   test_*.py           # Mirror source structure
 ```
@@ -216,6 +218,14 @@ def test_get_market_hours_handles_string_inputs(monkeypatch):
 - Required: `SCHWAB_CLIENT_ID`, `SCHWAB_CLIENT_SECRET`, `SCHWAB_CALLBACK_URL`
 - Never commit tokens from `~/.local/share/schwab-mcp/`
 - Changes enabling `--jesus-take-the-wheel` require documented safeguards
+
+### Cloud Run Admin Service
+
+- The admin service (`schwab-mcp-admin`) is deployed with `--no-allow-unauthenticated`
+- The Schwab OAuth callback requires temporary public access to `/datareceived`
+- Use `./schwab-auth.sh` to temporarily open access, complete the OAuth flow, and auto-revoke
+- **Never** deploy the admin service with `--allow-unauthenticated` permanently
+- Schwab tokens are stored in Cloud SQL Postgres (encrypted at rest), not Secret Manager
 
 ## Commit Message Format
 
