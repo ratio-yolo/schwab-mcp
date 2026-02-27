@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from typing import Any, Callable
 
@@ -32,9 +33,9 @@ from schwab_mcp.approvals import (
     DiscordApprovalSettings,
     NoOpApprovalManager,
 )
+from schwab_mcp.context import SchwabServerContext
 from schwab_mcp.db import CloudSQLManager, DatabaseManager, NoOpDatabaseManager
 from schwab_mcp.resources import register_resources
-from schwab_mcp.server import _client_lifespan
 from schwab_mcp.tools import register_tools
 
 from .config import RemoteServerConfig
@@ -136,6 +137,20 @@ def create_mcp_server(
 
     server_host = urlparse(config.server_url).hostname or "localhost"
 
+    # Build the shared context once; the lifespan just yields it.
+    # Resources are managed by the Starlette app lifespan, not per-request.
+    shared_context = SchwabServerContext(
+        client=schwab_client,
+        approval_manager=approval_manager,
+        db=db_manager or NoOpDatabaseManager(),
+    )
+
+    @asynccontextmanager
+    async def _static_lifespan(
+        _: FastMCP,
+    ) -> AsyncGenerator[SchwabServerContext, None]:
+        yield shared_context
+
     mcp = FastMCP(
         "schwab-mcp",
         stateless_http=True,
@@ -143,11 +158,7 @@ def create_mcp_server(
         transport_security=TransportSecuritySettings(
             allowed_hosts=[server_host],
         ),
-        lifespan=_client_lifespan(
-            schwab_client,
-            approval_manager,
-            db_manager or NoOpDatabaseManager(),
-        ),
+        lifespan=_static_lifespan,
     )
     register_tools(
         mcp,
