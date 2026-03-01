@@ -26,6 +26,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
+from starlette.types import ASGIApp
 
 from schwab_mcp.approvals import (
     ApprovalManager,
@@ -173,7 +174,7 @@ def create_mcp_server(
     return mcp
 
 
-def create_app(config: RemoteServerConfig) -> Starlette:
+def create_app(config: RemoteServerConfig) -> ASGIApp:
     """Build the full Starlette application with OAuth + MCP endpoints."""
 
     # Validate config
