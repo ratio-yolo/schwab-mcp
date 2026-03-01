@@ -4,9 +4,6 @@ import sys
 import anyio
 import os
 from schwab.client import AsyncClient
-
-logger = logging.getLogger(__name__)
-
 from schwab_mcp.server import SchwabMCPServer, send_error_response
 from schwab_mcp import auth as schwab_auth
 from schwab_mcp import tokens
@@ -16,6 +13,8 @@ from schwab_mcp.approvals import (
     NoOpApprovalManager,
 )
 from schwab_mcp.db import CloudSQLManager, DatabaseConfig, NoOpDatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 APP_NAME = "schwab-mcp"

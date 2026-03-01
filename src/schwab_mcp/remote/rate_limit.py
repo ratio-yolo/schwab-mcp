@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
