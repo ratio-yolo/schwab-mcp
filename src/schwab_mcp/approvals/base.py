@@ -45,15 +45,17 @@ class ApprovalManager(abc.ABC):
 class NoOpApprovalManager(ApprovalManager):
     """Approval manager that always approves requests.
 
-    When used with ``--jesus-take-the-wheel``, every write tool invocation
-    is logged with its full arguments for audit purposes.
+    When used as a bypass (jesus_take_the_wheel), every write operation is
+    auto-approved and audit-logged at WARNING level for forensic visibility.
     """
 
     async def require(self, request: ApprovalRequest) -> ApprovalDecision:
         logger.warning(
-            "Auto-approved write tool without human review: "
-            "tool=%s request_id=%s args=%s",
+            "AUTO-APPROVED write operation (no human review): "
+            "tool=%s, approval_id=%s, client_id=%s, request_id=%s, arguments=%s",
             request.tool_name,
+            request.id,
+            request.client_id or "<unknown>",
             request.request_id,
             dict(request.arguments),
         )

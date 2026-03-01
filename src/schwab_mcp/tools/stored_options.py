@@ -39,7 +39,11 @@ async def query_stored_options(
     if isinstance(ctx.db, NoOpDatabaseManager):
         return {"error": "Database not configured. Set SCHWAB_DB_* env vars to enable."}
 
-    conditions = ["oc.underlying_symbol = %s"]
+    # SECURITY: All condition strings below are hardcoded literals with %s
+    # placeholders. User-supplied values are ONLY passed via `params` and
+    # never interpolated into condition strings. Do NOT construct condition
+    # strings from user input.
+    conditions: list[str] = ["oc.underlying_symbol = %s"]
     params: list[Any] = [symbol.upper()]
 
     if put_call:

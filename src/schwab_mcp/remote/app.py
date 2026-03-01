@@ -40,6 +40,7 @@ from schwab_mcp.tools import register_tools
 
 from .config import RemoteServerConfig
 from .oauth import SchwabMCPOAuthProvider
+from .rate_limit import RateLimitMiddleware
 from .token_storage import PostgresTokenStorage
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,9 @@ def _create_approval_manager(
     """Create the approval manager based on config. Returns (manager, allow_write)."""
     if config.jesus_take_the_wheel:
         logger.warning(
-            "JESUS_TAKE_THE_WHEEL is active. "
-            "ALL write tool invocations will be auto-approved WITHOUT human review."
+            "*** JESUS_TAKE_THE_WHEEL is ENABLED — ALL write operations "
+            "(trades, orders, cancellations) will be auto-approved without "
+            "human review. Every auto-approved action is audit-logged. ***"
         )
         return NoOpApprovalManager(), True
 
@@ -221,6 +223,8 @@ def create_app(config: RemoteServerConfig) -> Starlette:
         return JSONResponse({"status": "ok", "service": "schwab-mcp"})
 
     # Combine all routes
+    # NOTE: /token-status intentionally omitted from the public MCP service.
+    # Token metadata is available via the IAM-protected admin service at /status.
     all_routes = list(oauth_routes) + [
         Route("/consent", endpoint=consent_page, methods=["GET"]),
         Route("/consent/approve", endpoint=consent_approve, methods=["POST"]),
@@ -273,6 +277,7 @@ def create_app(config: RemoteServerConfig) -> Starlette:
                 await db_manager.stop()
 
     app = Starlette(routes=all_routes, lifespan=lifespan)
+    app = RateLimitMiddleware(app)
     return app
 
 

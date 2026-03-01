@@ -17,6 +17,7 @@ import datetime
 import html
 import logging
 import secrets
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -42,6 +43,7 @@ def create_admin_app(config: AdminConfig) -> Starlette:
     # PKCE / state storage for the Schwab OAuth flow.
     # Entries are cleaned up after 10 minutes to prevent memory leaks.
     _OAUTH_STATE_TTL_SECONDS = 600
+    _OAUTH_STATE_MAX_ENTRIES = 5
     _oauth_state: dict[str, Any] = {}
 
     def _cleanup_expired_state() -> None:
@@ -132,6 +134,14 @@ def create_admin_app(config: AdminConfig) -> Starlette:
         """Initiate the Schwab OAuth flow."""
         _cleanup_expired_state()
 
+        # Cap the number of pending flows
+        if len(_oauth_state) >= _OAUTH_STATE_MAX_ENTRIES:
+            oldest = min(
+                _oauth_state,
+                key=lambda k: _oauth_state[k].get("created_at_mono", 0),
+            )
+            del _oauth_state[oldest]
+
         auth_context = schwab_auth.get_auth_context(
             config.schwab_client_id,
             config.schwab_callback_url,
@@ -141,6 +151,7 @@ def create_admin_app(config: AdminConfig) -> Starlette:
         _oauth_state[state] = {
             "auth_context": auth_context,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "created_at_mono": time.time(),
         }
 
         auth_url = auth_context.authorization_url
@@ -163,15 +174,13 @@ def create_admin_app(config: AdminConfig) -> Starlette:
 
         received_url = str(request.url)
 
-        auth_context = None
-        if state and state in _oauth_state:
-            auth_context = _oauth_state.pop(state)["auth_context"]
-
-        if auth_context is None:
+        if not state or state not in _oauth_state:
             return HTMLResponse(
-                "<h1>Error</h1><p>OAuth state missing or expired. Please try again.</p>",
+                "<h1>Error</h1><p>Invalid or expired OAuth state. Please try again.</p>",
                 status_code=400,
             )
+
+        auth_context = _oauth_state.pop(state)["auth_context"]
 
         try:
             # Exchange code for token using a sync token writer that
