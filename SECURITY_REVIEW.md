@@ -494,4 +494,70 @@ The following security practices are well-implemented and should be maintained:
 
 ---
 
+## 6. Remediation Status
+
+All high and medium severity issues have been fixed. Changes are on branch
+`claude/security-review-report-B3BT4`.
+
+### Fixed Issues
+
+| ID | Severity | Issue | Fix Applied |
+|----|----------|-------|-------------|
+| **H1** | HIGH | XSS in admin error page | `html.escape(str(e))` applied in `admin/app.py` |
+| **H2** | HIGH | CSRF bypass via OAuth state fallback | Fallback branch removed; strict state matching now required |
+| **H3** | HIGH | Unauthenticated `/token-status` | Endpoint removed from MCP service; info available via IAM-protected admin `/status` |
+| **H4** | HIGH | `--jesus-take-the-wheel` no guardrails | Startup WARNING emitted in both CLI and remote server; every auto-approved write op is audit-logged at WARNING level with full tool name, arguments, and request context |
+| **M1** | MEDIUM | Unbounded OAuth state dicts | Added capacity limits (MAX_CLIENTS=10, MAX_AUTH_CODES/TOKENS/STATE=50) with `_evict_expired()` periodic cleanup |
+| **M2** | MEDIUM | No rate limiting | Added `RateLimitMiddleware` (sliding window per IP): `/register` 10/min, `/token` 20/min, `/mcp` 120/min, `/consent` and `/authorize` 20/min |
+| **M3** | MEDIUM | No client registration limits | `register_client` now rejects when MAX_CLIENTS (10) is reached; all registrations logged |
+| **M4** | MEDIUM | Credentials dir permissions | Added `mode=0o700` to `credentials_path()` matching `token_path()` |
+| **M5** | MEDIUM | Exception messages leak data | Replaced `str(e)` in user-facing responses with generic messages; full tracebacks still logged server-side |
+| **M6** | MEDIUM | Containers run as root | Added `useradd -r appuser` / `USER appuser` to both `Dockerfile.mcp` and `Dockerfile.admin` |
+| **M7** | MEDIUM | SQL f-string pattern | Added SECURITY comment block above the query builder explaining that conditions are hardcoded literals only |
+| **M8** | MEDIUM | Admin OAuth state memory leak | Added 10-minute TTL eviction + max 5 entries cap to `_oauth_state` in admin service |
+
+### Low Severity Recommendations (L1–L5)
+
+These are accepted risks or minor concerns that do not require code changes
+before deployment. Recommendations for each:
+
+**L1: MCP service deployed with `--allow-unauthenticated`**
+- **Recommendation: Accept.** This is required by the MCP protocol — Claude.ai
+  must reach the OAuth discovery endpoints (`.well-known/oauth-authorization-server`)
+  and `/register` before it has credentials. The `/mcp` endpoint is OAuth-protected.
+  With rate limiting now in place (M2 fix), the exposure is further reduced. No
+  code change needed; just ensure no new sensitive endpoints are added to the
+  public route list without authentication.
+
+**L2: No independent CSRF token on consent form**
+- **Recommendation: Accept.** The OAuth `state` parameter is a
+  `secrets.token_hex(16)` value (128 bits of entropy) that functions as a
+  single-use CSRF token. The consent page loads zero external resources, so
+  Referer-based leakage is not a concern. If external resources (CDN fonts,
+  analytics scripts) are added in the future, revisit and add either a
+  `Referrer-Policy: no-referrer` header or a separate CSRF token.
+
+**L3: SQL semicolon-based statement splitting in `execute_script`**
+- **Recommendation: Accept with documentation.** The `execute_script` method
+  is only used for DDL schema setup (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX`),
+  which never contains semicolons in values. The method docstring already documents
+  this pg8000 limitation. If the method is ever used for DML with string values
+  containing semicolons, switch to a proper SQL parser or execute statements
+  individually.
+
+**L4: Self-signed SSL certificate for localhost**
+- **Recommendation: Accept (no action needed).** This is intentional and
+  correctly scoped. The `verify=False` only applies to the `127.0.0.1` callback
+  server used during the local Schwab OAuth browser flow. The callback URL
+  validation at `auth.py:114` ensures it cannot be redirected to external hosts.
+
+**L5: Callback URL displayed in full in CLI output**
+- **Recommendation: Accept.** The callback URL shown during `schwab-mcp auth`
+  contains the Schwab authorization endpoint and client ID, which are not
+  secrets (the client ID is a public identifier in OAuth). The actual sensitive
+  exchange happens server-side. Users should be aware that terminal scrollback
+  may capture this output, but the risk is negligible.
+
+---
+
 *End of security review report.*

@@ -55,6 +55,13 @@ class SchwabMCPOAuthProvider(
     - If the instance restarts, claude.ai will re-auth (transparent to user)
     """
 
+    # Capacity limits to prevent memory exhaustion (M1/M3)
+    MAX_CLIENTS = 10
+    MAX_AUTH_CODES = 50
+    MAX_ACCESS_TOKENS = 50
+    MAX_REFRESH_TOKENS = 50
+    MAX_STATE_MAPPINGS = 50
+
     def __init__(
         self,
         server_url: str,
@@ -63,12 +70,28 @@ class SchwabMCPOAuthProvider(
         self.server_url = server_url.rstrip("/")
         self.mcp_oauth_secret = mcp_oauth_secret
 
-        # In-memory stores
+        # In-memory stores (bounded — see _evict_expired)
         self._clients: dict[str, OAuthClientInformationFull] = {}
         self._auth_codes: dict[str, AuthorizationCode] = {}
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
         self._state_mapping: dict[str, dict[str, str | None]] = {}
+
+    def _evict_expired(self) -> None:
+        """Remove expired entries from all time-bounded stores."""
+        now = time.time()
+        self._auth_codes = {
+            k: v for k, v in self._auth_codes.items()
+            if not v.expires_at or v.expires_at > now
+        }
+        self._access_tokens = {
+            k: v for k, v in self._access_tokens.items()
+            if not v.expires_at or v.expires_at > now
+        }
+        self._refresh_tokens = {
+            k: v for k, v in self._refresh_tokens.items()
+            if not v.expires_at or v.expires_at > now
+        }
 
     async def get_client(
         self, client_id: str
@@ -80,6 +103,19 @@ class SchwabMCPOAuthProvider(
     ) -> None:
         if not client_info.client_id:
             raise ValueError("No client_id provided")
+
+        # Enforce client registration limit
+        if (
+            client_info.client_id not in self._clients
+            and len(self._clients) >= self.MAX_CLIENTS
+        ):
+            logger.warning(
+                "Client registration limit reached (%d). Rejecting client: %s",
+                self.MAX_CLIENTS,
+                client_info.client_id,
+            )
+            raise ValueError("Maximum number of registered clients reached")
+
         self._clients[client_info.client_id] = client_info
         logger.info("Registered OAuth client: %s", client_info.client_id)
 
@@ -87,7 +123,14 @@ class SchwabMCPOAuthProvider(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
         """Return a URL to the consent page."""
+        self._evict_expired()
+
         state = params.state or secrets.token_hex(16)
+
+        # Enforce state mapping limit
+        if len(self._state_mapping) >= self.MAX_STATE_MAPPINGS:
+            oldest_key = next(iter(self._state_mapping))
+            del self._state_mapping[oldest_key]
 
         self._state_mapping[state] = {
             "redirect_uri": str(params.redirect_uri),
@@ -241,6 +284,8 @@ class SchwabMCPOAuthProvider(
         if not client.client_id:
             raise ValueError("No client_id provided")
 
+        self._evict_expired()
+
         # Generate tokens
         access_token_str = f"smcp_at_{secrets.token_hex(32)}"
         refresh_token_str = f"smcp_rt_{secrets.token_hex(32)}"
@@ -307,6 +352,8 @@ class SchwabMCPOAuthProvider(
     ) -> OAuthToken:
         if not client.client_id:
             raise ValueError("No client_id provided")
+
+        self._evict_expired()
 
         # Revoke old refresh token
         if refresh_token.token in self._refresh_tokens:

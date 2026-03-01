@@ -1,9 +1,9 @@
 import click
+import logging
 import sys
 import anyio
 import os
 from schwab.client import AsyncClient
-
 from schwab_mcp.server import SchwabMCPServer, send_error_response
 from schwab_mcp import auth as schwab_auth
 from schwab_mcp import tokens
@@ -13,6 +13,8 @@ from schwab_mcp.approvals import (
     NoOpApprovalManager,
 )
 from schwab_mcp.db import CloudSQLManager, DatabaseConfig, NoOpDatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 APP_NAME = "schwab-mcp"
@@ -378,9 +380,9 @@ def server(
 
         if jesus_take_the_wheel:
             click.echo(
-                "WARNING: --jesus-take-the-wheel is active. "
-                "ALL write tool invocations (trades, orders) will be "
-                "auto-approved WITHOUT human review.",
+                "*** WARNING: --jesus-take-the-wheel is ENABLED — ALL write "
+                "operations (trades, orders, cancellations) will be "
+                "auto-approved without human review. ***",
                 err=True,
             )
             approval_manager = NoOpApprovalManager()
@@ -447,8 +449,9 @@ def server(
         anyio.run(server.run, backend="asyncio")
         return 0
     except Exception as e:
+        logger.exception("Server failed")
         send_error_response(
-            f"Error running server: {str(e)}", code=500, details={"error": str(e)}
+            f"Error running server: {type(e).__name__}", code=500
         )
         return 1
 
