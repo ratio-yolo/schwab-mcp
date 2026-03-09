@@ -80,14 +80,20 @@ echo "Waiting for Schwab auth to complete (${TIMEOUT}s timeout)..."
 echo "Complete the login in your browser, then this script will auto-close."
 echo ""
 
+# Capture the initial created_at so we can detect a *new* token
+initial_status=$(curl -s "${ADMIN_URL}/status" 2>/dev/null || echo "{}")
+initial_created=$(echo "$initial_status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('created_at', ''))" 2>/dev/null || echo "")
+
 elapsed=0
 interval=5
 while [[ $elapsed -lt $TIMEOUT ]]; do
     status=$(curl -s "${ADMIN_URL}/status" 2>/dev/null || echo "{}")
-    exists=$(echo "$status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('exists', False))" 2>/dev/null || echo "False")
+    created_at=$(echo "$status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('created_at', ''))" 2>/dev/null || echo "")
 
-    if [[ "$exists" == "True" ]]; then
-        echo "✓ Schwab token detected! Auth complete."
+    # Only succeed when the token's created_at timestamp has changed,
+    # meaning a fresh token was written during this session.
+    if [[ -n "$created_at" && "$created_at" != "$initial_created" ]]; then
+        echo "✓ New Schwab token detected! Auth complete."
         exit 0
     fi
 
