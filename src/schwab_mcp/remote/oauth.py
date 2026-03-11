@@ -81,26 +81,25 @@ class SchwabMCPOAuthProvider(
         """Remove expired entries from all time-bounded stores."""
         now = time.time()
         self._auth_codes = {
-            k: v for k, v in self._auth_codes.items()
+            k: v
+            for k, v in self._auth_codes.items()
             if not v.expires_at or v.expires_at > now
         }
         self._access_tokens = {
-            k: v for k, v in self._access_tokens.items()
+            k: v
+            for k, v in self._access_tokens.items()
             if not v.expires_at or v.expires_at > now
         }
         self._refresh_tokens = {
-            k: v for k, v in self._refresh_tokens.items()
+            k: v
+            for k, v in self._refresh_tokens.items()
             if not v.expires_at or v.expires_at > now
         }
 
-    async def get_client(
-        self, client_id: str
-    ) -> OAuthClientInformationFull | None:
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._clients.get(client_id)
 
-    async def register_client(
-        self, client_info: OAuthClientInformationFull
-    ) -> None:
+    async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if not client_info.client_id:
             raise ValueError("No client_id provided")
 

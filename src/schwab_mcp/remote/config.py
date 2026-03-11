@@ -71,9 +71,7 @@ class RemoteServerConfig:
             ),
             discord_approvers=os.environ.get("SCHWAB_MCP_DISCORD_APPROVERS", ""),
             discord_timeout=int(os.environ.get("SCHWAB_MCP_DISCORD_TIMEOUT", "600")),
-            jesus_take_the_wheel=os.environ.get(
-                "JESUS_TAKE_THE_WHEEL", ""
-            ).lower()
+            jesus_take_the_wheel=os.environ.get("JESUS_TAKE_THE_WHEEL", "").lower()
             in ("1", "true", "yes"),
             no_technical_tools=os.environ.get("NO_TECHNICAL_TOOLS", "").lower()
             in ("1", "true", "yes"),
@@ -159,7 +157,9 @@ class AdminConfig:
         if not self.schwab_client_secret:
             errors.append("SCHWAB_CLIENT_SECRET is required")
         if not self.schwab_callback_url:
-            errors.append("SCHWAB_CALLBACK_URL is required (admin service callback URL)")
+            errors.append(
+                "SCHWAB_CALLBACK_URL is required (admin service callback URL)"
+            )
         if not self.db_instance:
             errors.append("SCHWAB_DB_INSTANCE is required")
         if not self.db_password:

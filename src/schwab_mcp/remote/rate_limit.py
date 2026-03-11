@@ -62,9 +62,7 @@ class RateLimitMiddleware:
         self.app = app
         self.rules = rules or DEFAULT_RULES
         # key: (client_ip, path_prefix) → sliding window
-        self._windows: dict[tuple[str, str], _ClientWindow] = defaultdict(
-            _ClientWindow
-        )
+        self._windows: dict[tuple[str, str], _ClientWindow] = defaultdict(_ClientWindow)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":

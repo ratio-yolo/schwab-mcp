@@ -450,9 +450,7 @@ def server(
         return 0
     except Exception as e:
         logger.exception("Server failed")
-        send_error_response(
-            f"Error running server: {type(e).__name__}", code=500
-        )
+        send_error_response(f"Error running server: {type(e).__name__}", code=500)
         return 1
 
 

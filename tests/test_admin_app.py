@@ -25,9 +25,7 @@ class FakeDatabaseManager(DatabaseManager):
     ) -> list[tuple[Any, ...]]:
         return []
 
-    async def execute_many(
-        self, sql: str, params_seq: Sequence[Sequence[Any]]
-    ) -> None:
+    async def execute_many(self, sql: str, params_seq: Sequence[Sequence[Any]]) -> None:
         pass
 
 
@@ -88,9 +86,7 @@ def fake_storage() -> FakeTokenStorage:
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch, fake_storage: FakeTokenStorage) -> Any:
     fake_db = FakeDatabaseManager()
-    monkeypatch.setattr(
-        admin_app_module, "CloudSQLManager", lambda config: fake_db
-    )
+    monkeypatch.setattr(admin_app_module, "CloudSQLManager", lambda config: fake_db)
     monkeypatch.setattr(
         admin_app_module, "PostgresTokenStorage", lambda db: fake_storage
     )
@@ -123,9 +119,7 @@ class TestAdminDashboard:
     ) -> None:
         fake_db = FakeDatabaseManager()
         no_token_storage = FakeTokenStorage(token=None)
-        monkeypatch.setattr(
-            admin_app_module, "CloudSQLManager", lambda config: fake_db
-        )
+        monkeypatch.setattr(admin_app_module, "CloudSQLManager", lambda config: fake_db)
         monkeypatch.setattr(
             admin_app_module, "PostgresTokenStorage", lambda db: no_token_storage
         )
@@ -157,9 +151,7 @@ class TestSchwabAuth:
 
 
 class TestCallback:
-    def test_callback_without_code_returns_400(
-        self, client: TestClient
-    ) -> None:
+    def test_callback_without_code_returns_400(self, client: TestClient) -> None:
         resp = client.get("/datareceived")
         assert resp.status_code == 400
 
