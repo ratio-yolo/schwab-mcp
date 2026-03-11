@@ -68,17 +68,12 @@ class PostgresTokenStorage:
         """
         if self._cached_token is not None:
             return self._cached_token
-        raise FileNotFoundError(
-            "No cached token available. Call load_async() first."
-        )
+        raise FileNotFoundError("No cached token available. Call load_async() first.")
 
     async def load_async(self) -> dict[str, Any]:
         """Load the Schwab token from Postgres, using cache if fresh."""
         now = time.time()
-        if (
-            self._cached_token is not None
-            and (now - self._cache_time) < self.cache_ttl
-        ):
+        if self._cached_token is not None and (now - self._cache_time) < self.cache_ttl:
             return self._cached_token
 
         return await self._load_from_db()

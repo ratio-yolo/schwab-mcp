@@ -41,9 +41,7 @@ class FakeDatabaseManager(DatabaseManager):
             self.rows[key] = json.loads(params[1])
         return []
 
-    async def execute_many(
-        self, sql: str, params_seq: Sequence[Sequence[Any]]
-    ) -> None:
+    async def execute_many(self, sql: str, params_seq: Sequence[Sequence[Any]]) -> None:
         pass
 
 
@@ -151,9 +149,7 @@ class TestPostgresTokenStorage:
 
         run(storage.write_async(SAMPLE_TOKEN))
 
-        insert_calls = [
-            (sql, params) for sql, params in db.executed if "INSERT" in sql
-        ]
+        insert_calls = [(sql, params) for sql, params in db.executed if "INSERT" in sql]
         assert len(insert_calls) == 1
         assert "ON CONFLICT" in insert_calls[0][0]
         assert storage._cached_token == SAMPLE_TOKEN
@@ -232,7 +228,5 @@ class TestPostgresTokenStorage:
         result = run(storage.load_async())
 
         assert result == SAMPLE_TOKEN
-        select_calls = [
-            (sql, params) for sql, params in db.executed if "SELECT" in sql
-        ]
+        select_calls = [(sql, params) for sql, params in db.executed if "SELECT" in sql]
         assert select_calls[0][1] == ("user-42",)
