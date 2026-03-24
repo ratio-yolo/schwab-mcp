@@ -16,7 +16,6 @@ import contextlib
 import datetime
 import html
 import logging
-import secrets
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -147,18 +146,19 @@ def create_admin_app(config: AdminConfig) -> Starlette:
             config.schwab_callback_url,
         )
 
-        state = secrets.token_hex(16)
-        _oauth_state[state] = {
+        # Use schwab-py's own state as the lookup key. get_auth_context
+        # already embeds a state parameter in the authorization URL, and
+        # Schwab echoes that same value back in the callback. Appending a
+        # second state parameter caused a duplicate-state bug where the
+        # callback received schwab-py's state but tried to look up the
+        # admin's state — always failing with "Invalid or expired".
+        _oauth_state[auth_context.state] = {
             "auth_context": auth_context,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "created_at_mono": time.time(),
         }
 
-        auth_url = auth_context.authorization_url
-        separator = "&" if "?" in auth_url else "?"
-        auth_url_with_state = f"{auth_url}{separator}state={state}"
-
-        return RedirectResponse(url=auth_url_with_state, status_code=302)
+        return RedirectResponse(url=auth_context.authorization_url, status_code=302)
 
     async def schwab_callback(request: Request) -> Response:
         """Handle the Schwab OAuth callback."""

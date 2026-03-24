@@ -25,9 +25,7 @@ class FakeDatabaseManager(DatabaseManager):
     ) -> list[tuple[Any, ...]]:
         return []
 
-    async def execute_many(
-        self, sql: str, params_seq: Sequence[Sequence[Any]]
-    ) -> None:
+    async def execute_many(self, sql: str, params_seq: Sequence[Sequence[Any]]) -> None:
         pass
 
 
@@ -50,7 +48,10 @@ class FakeTokenStorage:
 
 
 class FakeAuthContext:
-    authorization_url = "https://api.schwabapi.com/authorize?client_id=test"
+    authorization_url = (
+        "https://api.schwabapi.com/authorize?client_id=test&state=fake-state-abc"
+    )
+    state = "fake-state-abc"
 
 
 class FakeSchwabAuth:
@@ -88,9 +89,7 @@ def fake_storage() -> FakeTokenStorage:
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch, fake_storage: FakeTokenStorage) -> Any:
     fake_db = FakeDatabaseManager()
-    monkeypatch.setattr(
-        admin_app_module, "CloudSQLManager", lambda config: fake_db
-    )
+    monkeypatch.setattr(admin_app_module, "CloudSQLManager", lambda config: fake_db)
     monkeypatch.setattr(
         admin_app_module, "PostgresTokenStorage", lambda db: fake_storage
     )
@@ -123,9 +122,7 @@ class TestAdminDashboard:
     ) -> None:
         fake_db = FakeDatabaseManager()
         no_token_storage = FakeTokenStorage(token=None)
-        monkeypatch.setattr(
-            admin_app_module, "CloudSQLManager", lambda config: fake_db
-        )
+        monkeypatch.setattr(admin_app_module, "CloudSQLManager", lambda config: fake_db)
         monkeypatch.setattr(
             admin_app_module, "PostgresTokenStorage", lambda db: no_token_storage
         )
@@ -150,6 +147,15 @@ class TestSchwabAuth:
         assert resp.status_code == 302
         assert "schwabapi.com" in resp.headers["location"]
 
+    def test_auth_start_does_not_duplicate_state(
+        self, monkeypatch: pytest.MonkeyPatch, client: TestClient
+    ) -> None:
+        """The redirect URL must not have a second state= appended."""
+        monkeypatch.setattr(admin_app_module, "schwab_auth", FakeSchwabAuth)
+        resp = client.get("/schwab/auth", follow_redirects=False)
+        location = resp.headers["location"]
+        assert location.count("state=") == 1
+
 
 # ---------------------------------------------------------------------------
 # TestCallback
@@ -157,9 +163,7 @@ class TestSchwabAuth:
 
 
 class TestCallback:
-    def test_callback_without_code_returns_400(
-        self, client: TestClient
-    ) -> None:
+    def test_callback_without_code_returns_400(self, client: TestClient) -> None:
         resp = client.get("/datareceived")
         assert resp.status_code == 400
 
@@ -168,6 +172,51 @@ class TestCallback:
     ) -> None:
         resp = client.get("/datareceived?code=xyz")
         assert resp.status_code == 400
+
+    def test_callback_with_wrong_state_returns_400(
+        self, monkeypatch: pytest.MonkeyPatch, client: TestClient
+    ) -> None:
+        monkeypatch.setattr(admin_app_module, "schwab_auth", FakeSchwabAuth)
+        # Start the auth flow to populate _oauth_state
+        client.get("/schwab/auth", follow_redirects=False)
+        # Callback with a different state value
+        resp = client.get("/datareceived?code=abc&state=wrong-state")
+        assert resp.status_code == 400
+        assert "Invalid or expired" in resp.text
+
+    def test_full_oauth_roundtrip(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        client: TestClient,
+        fake_storage: FakeTokenStorage,
+    ) -> None:
+        """Auth start → callback with matching state succeeds."""
+        fake_token = _make_token()
+
+        def fake_client_from_received_url(*args: Any, **kwargs: Any) -> None:
+            # Simulate the token writer callback
+            token_writer = kwargs.get("token_write_func") or args[4]
+            token_writer(fake_token)
+            return None
+
+        monkeypatch.setattr(admin_app_module, "schwab_auth", FakeSchwabAuth)
+        monkeypatch.setattr(
+            FakeSchwabAuth,
+            "client_from_received_url",
+            staticmethod(fake_client_from_received_url),
+        )
+
+        # Start auth → populates _oauth_state with auth_context.state key
+        resp = client.get("/schwab/auth", follow_redirects=False)
+        assert resp.status_code == 302
+
+        # Callback with the same state schwab-py embedded
+        resp = client.get(
+            f"/datareceived?code=authcode123&state={FakeAuthContext.state}"
+        )
+        assert resp.status_code == 200
+        assert "successful" in resp.text
+        assert len(fake_storage.written) == 1
 
 
 # ---------------------------------------------------------------------------
