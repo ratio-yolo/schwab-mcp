@@ -137,6 +137,23 @@ def test_query_stored_options_symbol_uppercased():
     assert db.last_params[0] == "SPY"
 
 
+def test_query_stored_options_scoped_to_latest_snapshot():
+    """Bug fix: query must filter to only the most recent snapshot."""
+    db = MockDatabaseManager(rows=[])
+    ctx = make_ctx(client=None, db=db)
+    run(query_stored_options(ctx, "SPX"))
+
+    assert db.last_sql is not None
+    assert (
+        "s.id = (SELECT id FROM option_chain_snapshots WHERE symbol = %s ORDER BY fetch_timestamp DESC LIMIT 1)"
+        in db.last_sql
+    )
+    # symbol param appears twice: once for oc.underlying_symbol, once for subquery
+    assert db.last_params is not None
+    assert db.last_params[0] == "SPX"
+    assert db.last_params[1] == "SPX"
+
+
 # ---------------------------------------------------------------------------
 # list_option_snapshots
 # ---------------------------------------------------------------------------

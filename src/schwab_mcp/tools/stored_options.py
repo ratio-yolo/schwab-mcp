@@ -43,8 +43,12 @@ async def query_stored_options(
     # placeholders. User-supplied values are ONLY passed via `params` and
     # never interpolated into condition strings. Do NOT construct condition
     # strings from user input.
-    conditions: list[str] = ["oc.underlying_symbol = %s"]
-    params: list[Any] = [symbol.upper()]
+    symbol_upper = symbol.upper()
+    conditions: list[str] = [
+        "oc.underlying_symbol = %s",
+        "s.id = (SELECT id FROM option_chain_snapshots WHERE symbol = %s ORDER BY fetch_timestamp DESC LIMIT 1)",
+    ]
+    params: list[Any] = [symbol_upper, symbol_upper]
 
     if put_call:
         conditions.append("oc.put_call = %s")
