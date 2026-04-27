@@ -8,6 +8,7 @@ Combines:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from contextlib import asynccontextmanager
@@ -174,6 +175,24 @@ def create_mcp_server(
     return mcp
 
 
+_TOKEN_POLL_SECONDS = 60
+
+
+async def _token_poll_loop(token_storage: PostgresTokenStorage) -> None:
+    """Background task: reload cached token from Postgres when admin re-auths.
+
+    Runs every _TOKEN_POLL_SECONDS. If the admin service has written a newer
+    token (e.g. after schwab-auth.sh), the in-memory cache is updated so the
+    next tool call uses the new refresh token instead of the stale one.
+    """
+    while True:
+        await asyncio.sleep(_TOKEN_POLL_SECONDS)
+        try:
+            await token_storage.poll_for_updates()
+        except Exception:
+            logger.warning("Error during Schwab token poll", exc_info=True)
+
+
 def create_app(config: RemoteServerConfig) -> ASGIApp:
     """Build the full Starlette application with OAuth + MCP endpoints."""
 
@@ -271,10 +290,20 @@ def create_app(config: RemoteServerConfig) -> ASGIApp:
         mcp_app = mcp_server.streamable_http_app()
         app.routes.append(Mount("/", app=mcp_app))
 
+        poll_task = asyncio.create_task(
+            _token_poll_loop(token_storage), name="schwab-token-poll"
+        )
+        logger.info(
+            "Schwab token poll loop started (interval=%ds)", _TOKEN_POLL_SECONDS
+        )
+
         async with mcp_server.session_manager.run():
             try:
                 yield
             finally:
+                poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll_task
                 await db_manager.stop()
 
     app = Starlette(routes=all_routes, lifespan=lifespan)

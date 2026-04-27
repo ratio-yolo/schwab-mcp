@@ -12,6 +12,7 @@ CloudSQLManager with pg8000 via cloud-sql-python-connector.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import time
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 # Default cache TTL: 5 minutes
 DEFAULT_CACHE_TTL_SECONDS = 300
+
+# Sentinel: older than any real token timestamp so the first poll always compares correctly.
+_EPOCH = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
 
 # Schema for the token table — executed on ensure_table()
 TOKEN_TABLE_SQL = """
@@ -55,6 +59,7 @@ class PostgresTokenStorage:
 
         self._cached_token: dict[str, Any] | None = None
         self._cache_time: float = 0.0
+        self._db_updated_at: datetime.datetime = _EPOCH
 
     async def ensure_table(self) -> None:
         """Create the schwab_tokens table if it doesn't exist."""
@@ -81,7 +86,7 @@ class PostgresTokenStorage:
     async def _load_from_db(self) -> dict[str, Any]:
         """Load the token directly from Postgres."""
         rows = await self.db.execute(
-            "SELECT token_data FROM schwab_tokens WHERE key = %s",
+            "SELECT token_data, updated_at FROM schwab_tokens WHERE key = %s",
             (self.key,),
         )
         if not rows:
@@ -98,6 +103,8 @@ class PostgresTokenStorage:
 
         self._cached_token = token_data
         self._cache_time = time.time()
+        if rows[0][1] is not None:
+            self._db_updated_at = rows[0][1]
         logger.info("Loaded Schwab token from Postgres (key=%s)", self.key)
         return token_data
 
@@ -150,7 +157,44 @@ class PostgresTokenStorage:
             """,
             (self.key, token_json),
         )
+        # Approximate the DB updated_at so the next poll doesn't trigger a reload
+        # for this write-back (avoids spurious reloads after normal access-token refresh).
+        self._db_updated_at = datetime.datetime.now(datetime.timezone.utc)
         logger.info("Wrote Schwab token to Postgres (key=%s)", self.key)
+
+    async def poll_for_updates(self) -> bool:
+        """Reload the token from Postgres if a newer version has been written there.
+
+        Called periodically by the background poll loop so that a fresh token
+        written by the admin service (after ``schwab-auth.sh`` re-auth) is
+        picked up without a service restart.
+
+        Returns True if the cache was refreshed.
+        """
+        try:
+            rows = await self.db.execute(
+                "SELECT updated_at FROM schwab_tokens WHERE key = %s",
+                (self.key,),
+            )
+        except Exception:
+            logger.warning(
+                "Could not poll Postgres for token updates (key=%s)", self.key
+            )
+            return False
+
+        if not rows:
+            return False
+
+        db_updated_at: datetime.datetime = rows[0][0]
+        if db_updated_at <= self._db_updated_at:
+            return False
+
+        logger.info(
+            "Newer Schwab token detected in Postgres (key=%s); refreshing cache",
+            self.key,
+        )
+        await self._load_from_db()
+        return True
 
     async def exists_async(self) -> bool:
         """Check whether a token exists in the database."""
