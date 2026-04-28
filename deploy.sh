@@ -85,7 +85,7 @@ deploy_mcp() {
         --memory 512Mi \
         --timeout 300 \
         --max-instances 1 \
-        --set-env-vars "SCHWAB_DB_INSTANCE=$DB_INSTANCE,SCHWAB_DB_NAME=$DB_NAME,SCHWAB_DB_USER=$DB_USER,JSON_OUTPUT=true" \
+        --set-env-vars "SCHWAB_DB_INSTANCE=$DB_INSTANCE,SCHWAB_DB_NAME=$DB_NAME,SCHWAB_DB_USER=$DB_USER,JSON_OUTPUT=true,DISABLE_TRADING_TOOLS=true" \
         --set-secrets "SCHWAB_CLIENT_ID=${SCHWAB_CLIENT_ID_SECRET}:latest,SCHWAB_CLIENT_SECRET=${SCHWAB_CLIENT_SECRET_SECRET}:latest,SCHWAB_DB_PASSWORD=${DB_PASSWORD_SECRET}:latest,MCP_OAUTH_CLIENT_SECRET=${MCP_OAUTH_SECRET}:latest" \
         --add-cloudsql-instances "$DB_INSTANCE"
 

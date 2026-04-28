@@ -40,6 +40,7 @@ class RemoteServerConfig:
     # Feature flags
     jesus_take_the_wheel: bool = False
     no_technical_tools: bool = False
+    disable_trading_tools: bool = False
     json_output: bool = True  # Default to JSON for remote
 
     # Server settings
@@ -74,6 +75,8 @@ class RemoteServerConfig:
             jesus_take_the_wheel=os.environ.get("JESUS_TAKE_THE_WHEEL", "").lower()
             in ("1", "true", "yes"),
             no_technical_tools=os.environ.get("NO_TECHNICAL_TOOLS", "").lower()
+            in ("1", "true", "yes"),
+            disable_trading_tools=os.environ.get("DISABLE_TRADING_TOOLS", "").lower()
             in ("1", "true", "yes"),
             json_output=os.environ.get("JSON_OUTPUT", "true").lower()
             in ("1", "true", "yes"),
