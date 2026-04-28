@@ -168,6 +168,7 @@ def create_mcp_server(
         schwab_client,
         allow_write=allow_write,
         enable_technical=not config.no_technical_tools,
+        enable_trading=not config.disable_trading_tools,
         result_transform=result_transform,
     )
     register_resources(mcp)

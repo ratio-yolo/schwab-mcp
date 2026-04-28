@@ -20,14 +20,17 @@ from schwab_mcp.tools import transactions as _txns
 
 logger = logging.getLogger(__name__)
 
-_TOOL_MODULES = (
+_MARKET_DATA_MODULES = (
     _tools,
-    _account,
     _history,
     _options,
-    _orders,
     _quotes,
     _stored_options,
+)
+
+_TRADING_MODULES = (
+    _account,
+    _orders,
     _txns,
 )
 
@@ -38,12 +41,22 @@ def register_tools(
     *,
     allow_write: bool,
     enable_technical: bool = True,
+    enable_trading: bool = True,
     result_transform: Callable[[Any], Any] | None = None,
 ) -> None:
-    """Register all Schwab tools with the provided FastMCP server."""
+    """Register all Schwab tools with the provided FastMCP server.
+
+    Set ``enable_trading=False`` to skip account, order, and transaction tools
+    when the Schwab developer app does not have the Accounts and Trading
+    Production API product enabled.
+    """
     _ = client
 
-    modules = _TOOL_MODULES
+    modules = _MARKET_DATA_MODULES
+    if enable_trading:
+        modules = modules + _TRADING_MODULES
+    else:
+        logger.info("Trading tools disabled; only market data tools will be registered")
     if enable_technical:
         modules = modules + (_technical,)
 

@@ -70,7 +70,8 @@ def test_register_tools_always_registers_write_tools(monkeypatch) -> None:
         register_tool(server, write_tool, write=True, result_transform=result_transform)
 
     dummy_module = SimpleNamespace(register=register_module)
-    monkeypatch.setattr(tools_module, "_TOOL_MODULES", (dummy_module,))
+    monkeypatch.setattr(tools_module, "_MARKET_DATA_MODULES", (dummy_module,))
+    monkeypatch.setattr(tools_module, "_TRADING_MODULES", ())
 
     read_only_server = FastMCP(name="read-only")
     tools_module.register_tools(
