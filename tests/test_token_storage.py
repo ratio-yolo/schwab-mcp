@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import time
 from typing import Any, Sequence
@@ -11,9 +12,13 @@ from schwab_mcp.db import DatabaseManager
 from schwab_mcp.remote.token_storage import PostgresTokenStorage
 
 
+_FAKE_TS = datetime.datetime(2024, 6, 1, tzinfo=datetime.timezone.utc)
+
+
 class FakeDatabaseManager(DatabaseManager):
     def __init__(self) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
+        self.timestamps: dict[str, datetime.datetime] = {}
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
 
     async def start(self) -> None:
@@ -26,19 +31,27 @@ class FakeDatabaseManager(DatabaseManager):
         self, sql: str, params: Sequence[Any] = ()
     ) -> list[tuple[Any, ...]]:
         self.executed.append((sql, tuple(params)))
-        if sql.strip().startswith("SELECT token_data"):
-            key = params[0] if params else "default"
+        stripped = sql.strip()
+        key = params[0] if params else "default"
+
+        if stripped.startswith("SELECT token_data"):
             if key in self.rows:
-                return [(self.rows[key],)]
+                ts = self.timestamps.get(key, _FAKE_TS)
+                return [(self.rows[key], ts)]
             return []
-        if sql.strip().startswith("SELECT 1"):
-            key = params[0] if params else "default"
+        if stripped.startswith("SELECT updated_at"):
+            if key in self.rows:
+                ts = self.timestamps.get(key, _FAKE_TS)
+                return [(ts,)]
+            return []
+        if stripped.startswith("SELECT 1"):
             if key in self.rows:
                 return [(1,)]
             return []
-        if sql.strip().startswith("INSERT"):
+        if stripped.startswith("INSERT"):
             key = params[0]
             self.rows[key] = json.loads(params[1])
+            self.timestamps[key] = datetime.datetime.now(datetime.timezone.utc)
         return []
 
     async def execute_many(self, sql: str, params_seq: Sequence[Sequence[Any]]) -> None:
@@ -230,3 +243,91 @@ class TestPostgresTokenStorage:
         assert result == SAMPLE_TOKEN
         select_calls = [(sql, params) for sql, params in db.executed if "SELECT" in sql]
         assert select_calls[0][1] == ("user-42",)
+
+    def test_load_from_db_captures_updated_at(self) -> None:
+        db = FakeDatabaseManager()
+        db.rows["default"] = SAMPLE_TOKEN
+        ts = datetime.datetime(2025, 3, 15, tzinfo=datetime.timezone.utc)
+        db.timestamps["default"] = ts
+        storage = PostgresTokenStorage(db)
+
+        run(storage.load_async())
+
+        assert storage._db_updated_at == ts
+
+
+class TestPollForUpdates:
+    def test_returns_true_and_reloads_when_db_is_newer(self) -> None:
+        db = FakeDatabaseManager()
+        db.rows["default"] = SAMPLE_TOKEN
+        newer_ts = datetime.datetime(2025, 6, 1, tzinfo=datetime.timezone.utc)
+        db.timestamps["default"] = newer_ts
+        storage = PostgresTokenStorage(db)
+        # _db_updated_at starts at _EPOCH (year 2000), so newer_ts is definitely newer
+
+        result = run(storage.poll_for_updates())
+
+        assert result is True
+        assert storage._cached_token == SAMPLE_TOKEN
+        assert storage._db_updated_at == newer_ts
+
+    def test_returns_false_when_db_timestamp_unchanged(self) -> None:
+        db = FakeDatabaseManager()
+        db.rows["default"] = SAMPLE_TOKEN
+        ts = datetime.datetime(2025, 6, 1, tzinfo=datetime.timezone.utc)
+        db.timestamps["default"] = ts
+        storage = PostgresTokenStorage(db)
+        storage._db_updated_at = ts  # same as DB → no update needed
+
+        result = run(storage.poll_for_updates())
+
+        assert result is False
+        assert storage._cached_token is None  # no reload occurred
+
+    def test_returns_false_when_no_token_in_db(self) -> None:
+        db = FakeDatabaseManager()
+        storage = PostgresTokenStorage(db)
+
+        result = run(storage.poll_for_updates())
+
+        assert result is False
+
+    def test_returns_false_and_logs_on_db_error(self) -> None:
+        class BrokenDB(FakeDatabaseManager):
+            async def execute(
+                self, sql: str, params: Sequence[Any] = ()
+            ) -> list[tuple[Any, ...]]:
+                if "SELECT updated_at" in sql:
+                    raise RuntimeError("connection lost")
+                return await super().execute(sql, params)
+
+        db = BrokenDB()
+        storage = PostgresTokenStorage(db)
+
+        result = run(storage.poll_for_updates())
+
+        assert result is False
+
+    def test_write_async_sets_db_updated_at(self) -> None:
+        db = FakeDatabaseManager()
+        storage = PostgresTokenStorage(db)
+
+        before = datetime.datetime.now(datetime.timezone.utc)
+        run(storage.write_async(SAMPLE_TOKEN))
+        after = datetime.datetime.now(datetime.timezone.utc)
+
+        assert before <= storage._db_updated_at <= after
+
+    def test_poll_after_write_back_does_not_reload(self) -> None:
+        """Normal access-token write-back should not trigger a poll reload."""
+        db = FakeDatabaseManager()
+        storage = PostgresTokenStorage(db)
+
+        # Simulate schwab-py writing back a refreshed access token
+        run(storage.write_async(SAMPLE_TOKEN))
+        # The DB timestamp and _db_updated_at are now ~equal
+
+        result = run(storage.poll_for_updates())
+
+        # No reload: DB updated_at should not be newer than _db_updated_at
+        assert result is False
