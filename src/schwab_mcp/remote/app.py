@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 from contextlib import asynccontextmanager
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
 from typing import Any, Callable
 
 from mcp.server.auth.routes import create_auth_routes
@@ -118,8 +118,13 @@ def create_mcp_server(
     approval_manager: ApprovalManager,
     allow_write: bool,
     db_manager: DatabaseManager | None = None,
-) -> FastMCP:
-    """Create the FastMCP server with all tools registered."""
+) -> tuple[FastMCP, SchwabServerContext]:
+    """Create the FastMCP server with all tools registered.
+
+    Returns the server together with the shared ``SchwabServerContext`` so the
+    caller can hot-swap the Schwab client (e.g. after a token re-auth) without
+    rebuilding the server.
+    """
     result_transform: Callable[[Any], Any] | None = None
     if not config.json_output:
         try:
@@ -173,23 +178,55 @@ def create_mcp_server(
         result_transform=result_transform,
     )
     register_resources(mcp)
-    return mcp
+    return mcp, shared_context
 
 
 _TOKEN_POLL_SECONDS = 60
 
 
-async def _token_poll_loop(token_storage: PostgresTokenStorage) -> None:
-    """Background task: reload cached token from Postgres when admin re-auths.
+async def _rebuild_client(
+    config: RemoteServerConfig,
+    token_storage: PostgresTokenStorage,
+    shared_context: SchwabServerContext,
+) -> None:
+    """Rebuild the Schwab client from the freshly reloaded token and swap it in.
+
+    The schwab-py client holds the token inside its session at construction
+    time, so simply refreshing the storage cache is not enough — the live
+    client keeps using the stale token until it is rebuilt. We construct a new
+    client (which reads the current token via the storage loader) and swap it
+    onto the shared context. The old client's HTTP session is closed
+    best-effort.
+    """
+    old_client = shared_context.client
+    new_client = _create_schwab_client(config, token_storage)
+    shared_context.set_client(new_client)
+    logger.info("Rebuilt Schwab client with refreshed token (no restart needed)")
+
+    # Best-effort close of the previous client's HTTP session. The placeholder
+    # dummy client raises on attribute access, so guard with a broad except.
+    try:
+        await old_client.close_async_session()
+    except Exception:
+        logger.debug("Failed to close previous Schwab client session", exc_info=True)
+
+
+async def _token_poll_loop(
+    token_storage: PostgresTokenStorage,
+    on_token_refreshed: Callable[[], Awaitable[None]],
+) -> None:
+    """Background task: reload the token from Postgres when admin re-auths.
 
     Runs every _TOKEN_POLL_SECONDS. If the admin service has written a newer
-    token (e.g. after schwab-auth.sh), the in-memory cache is updated so the
-    next tool call uses the new refresh token instead of the stale one.
+    token (e.g. after schwab-auth.sh), the in-memory cache is refreshed and the
+    live Schwab client is rebuilt so it uses the new refresh token instead of
+    the stale one — without requiring a service restart.
     """
     while True:
         await asyncio.sleep(_TOKEN_POLL_SECONDS)
         try:
-            await token_storage.poll_for_updates()
+            if await token_storage.poll_for_updates():
+                await on_token_refreshed()
         except Exception:
             logger.warning("Error during Schwab token poll", exc_info=True)
 
@@ -278,7 +315,7 @@ def create_app(config: RemoteServerConfig) -> ASGIApp:
             )
 
         approval_manager, allow_write = _create_approval_manager(config)
-        mcp_server = create_mcp_server(
+        mcp_server, shared_context = create_mcp_server(
             config,
             schwab_client or _create_dummy_client(),
             approval_manager,
@@ -291,8 +328,12 @@ def create_app(config: RemoteServerConfig) -> ASGIApp:
         mcp_app = mcp_server.streamable_http_app()
         app.routes.append(Mount("/", app=mcp_app))
 
+        async def _on_token_refreshed() -> None:
+            await _rebuild_client(config, token_storage, shared_context)
+
         poll_task = asyncio.create_task(
-            _token_poll_loop(token_storage), name="schwab-token-poll"
+            _token_poll_loop(token_storage, _on_token_refreshed),
+            name="schwab-token-poll",
         )
         logger.info(
             "Schwab token poll loop started (interval=%ds)", _TOKEN_POLL_SECONDS
