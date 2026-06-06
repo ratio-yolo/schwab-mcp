@@ -41,13 +41,27 @@ class SchwabServerContext:
     transactions: TransactionsClient = field(init=False)
 
     def __post_init__(self) -> None:
-        self.tools = cast(ToolsClient, self.client)
-        self.accounts = cast(AccountClient, self.client)
-        self.price_history = cast(PriceHistoryClient, self.client)
-        self.options = cast(OptionsClient, self.client)
-        self.orders = cast(OrdersClient, self.client)
-        self.quotes = cast(QuotesClient, self.client)
-        self.transactions = cast(TransactionsClient, self.client)
+        self._bind_client(self.client)
+
+    def set_client(self, client: AsyncClient) -> None:
+        """Swap the live Schwab client and refresh the typed facades.
+
+        Used to hot-reload the client after a Schwab re-auth writes a new
+        token to the database, so the running server picks up the fresh token
+        without a restart. In-flight tool calls keep their existing client
+        reference; subsequent calls use the new one.
+        """
+        self.client = client
+        self._bind_client(client)
+
+    def _bind_client(self, client: AsyncClient) -> None:
+        self.tools = cast(ToolsClient, client)
+        self.accounts = cast(AccountClient, client)
+        self.price_history = cast(PriceHistoryClient, client)
+        self.options = cast(OptionsClient, client)
+        self.orders = cast(OrdersClient, client)
+        self.quotes = cast(QuotesClient, client)
+        self.transactions = cast(TransactionsClient, client)
 
 
 class SchwabContext(MCPContext[Any, SchwabServerContext, Any]):
