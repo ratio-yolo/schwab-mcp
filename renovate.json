@@ -14,6 +14,11 @@
     {
       "matchManagers": ["pip_requirements", "pip-compile", "poetry", "pep621"],
       "groupName": "python dependencies"
+    },
+    {
+      "description": "Pin schwab-py to the jkoelker fork rev. Renovate tracks the fork's default branch HEAD, which points at the older upstream baseline lacking the base_url/DEFAULT_BASE_URL feature we depend on, so automatic bumps regress the API. Update this dependency manually.",
+      "matchPackageNames": ["schwab-py"],
+      "enabled": false
     }
   ]
 }
