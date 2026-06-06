@@ -20,6 +20,7 @@ set -euo pipefail
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${REGION:-us-west1}"
 ADMIN_SERVICE="schwab-mcp-admin"
+MCP_SERVICE="${MCP_SERVICE:-schwab-mcp}"
 TIMEOUT=300  # 5 minutes
 
 if [[ -z "$PROJECT_ID" ]]; then
@@ -38,6 +39,28 @@ if [[ -z "$ADMIN_URL" ]]; then
     echo "Run ./deploy.sh --admin-only first."
     exit 1
 fi
+
+# Restart the MCP service so it reloads the fresh token from Postgres.
+# The running server caches the Schwab token in memory at startup and only
+# reloads it from the database when a new revision boots, so a re-auth has
+# no effect on the live server until it is restarted.
+restart_mcp() {
+    echo ""
+    echo "--- Restarting $MCP_SERVICE to load the new token ---"
+    if gcloud run services update "$MCP_SERVICE" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --update-labels="token-refreshed-at=$(date +%s)" \
+        --quiet >/dev/null 2>&1; then
+        echo "✓ $MCP_SERVICE restarted; new revision will load the fresh token."
+    else
+        echo "⚠ Could not restart $MCP_SERVICE automatically."
+        echo "  Restart it manually so it picks up the new token:"
+        echo "    gcloud run services update $MCP_SERVICE \\"
+        echo "      --region=$REGION --project=$PROJECT_ID \\"
+        echo "      --update-labels=token-refreshed-at=\$(date +%s)"
+    fi
+}
 
 # Ensure we always revoke access on exit
 revoke_access() {
@@ -94,6 +117,7 @@ while [[ $elapsed -lt $TIMEOUT ]]; do
     # meaning a fresh token was written during this session.
     if [[ -n "$created_at" && "$created_at" != "$initial_created" ]]; then
         echo "✓ New Schwab token detected! Auth complete."
+        restart_mcp
         exit 0
     fi
 
