@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import secrets
 import time
+from html import escape as html_escape
 
 from pydantic import AnyHttpUrl
 from starlette.requests import Request
@@ -144,12 +145,21 @@ class SchwabMCPOAuthProvider(
         # Redirect to our consent page
         return f"{self.server_url}/consent?state={state}"
 
-    async def get_consent_page(self, state: str) -> HTMLResponse:
-        """Render a simple consent page for the user to approve."""
+    async def get_consent_page(
+        self, state: str, error: str | None = None, status_code: int = 200
+    ) -> HTMLResponse:
+        """Render a simple consent page for the user to approve.
+
+        Approval requires the shared passphrase (``MCP_OAUTH_CLIENT_SECRET``)
+        to be entered. Without it the consent page cannot mint an auth code,
+        so reaching this URL alone grants no access.
+        """
         if state not in self._state_mapping:
             return HTMLResponse(
                 content="<h1>Invalid or expired state</h1>", status_code=400
             )
+
+        error_banner = f'<p class="error">{html_escape(error)}</p>' if error else ""
 
         html = f"""<!DOCTYPE html>
 <html>
@@ -191,6 +201,23 @@ class SchwabMCPOAuthProvider(
             color: #374151;
         }}
         .deny:hover {{ background: #d1d5db; }}
+        .error {{
+            background: #fee2e2;
+            color: #991b1b;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 0.9em;
+        }}
+        label {{ display: block; margin-top: 16px; font-size: 0.9em; color: #374151; }}
+        input[type=password] {{
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 6px;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 1em;
+        }}
     </style>
 </head>
 <body>
@@ -199,8 +226,12 @@ class SchwabMCPOAuthProvider(
         <p>Claude.ai is requesting access to your Schwab MCP server.
         This will allow Claude to use your Schwab brokerage tools
         (account info, quotes, options, orders).</p>
+        {error_banner}
         <form action="{self.server_url}/consent/approve" method="post">
             <input type="hidden" name="state" value="{state}">
+            <label for="secret">Passphrase</label>
+            <input type="password" id="secret" name="secret"
+                   autocomplete="off" autofocus required>
             <div class="actions">
                 <button type="submit" name="action" value="approve" class="approve">
                     Approve
@@ -213,7 +244,7 @@ class SchwabMCPOAuthProvider(
     </div>
 </body>
 </html>"""
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=html, status_code=status_code)
 
     async def handle_consent(self, request: Request) -> Response:
         """Process the consent form submission."""
@@ -237,6 +268,33 @@ class SchwabMCPOAuthProvider(
             )
             del self._state_mapping[state]
             return RedirectResponse(url=error_url, status_code=302)
+
+        # Verify the shared passphrase before approving. This is the real
+        # access control: anyone can reach the consent page, but only a caller
+        # who knows MCP_OAUTH_CLIENT_SECRET can mint an authorization code.
+        if not self.mcp_oauth_secret:
+            # Fail closed: a misconfigured server must never auto-approve.
+            logger.error(
+                "Consent approval rejected: MCP_OAUTH_CLIENT_SECRET is not set. "
+                "Refusing to issue an authorization code."
+            )
+            return await self.get_consent_page(
+                state,
+                error="Server is misconfigured (no passphrase set). "
+                "Approval is disabled.",
+                status_code=403,
+            )
+
+        submitted = form.get("secret")
+        if not isinstance(submitted, str) or not secrets.compare_digest(
+            submitted, self.mcp_oauth_secret
+        ):
+            logger.warning("Consent approval rejected: invalid passphrase")
+            return await self.get_consent_page(
+                state,
+                error="Invalid passphrase. Please try again.",
+                status_code=401,
+            )
 
         # Approved - generate auth code
         code_challenge = state_data["code_challenge"]

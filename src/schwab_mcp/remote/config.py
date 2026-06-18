@@ -105,6 +105,11 @@ class RemoteServerConfig:
             errors.append("SCHWAB_DB_INSTANCE is required")
         if not self.db_password:
             errors.append("SCHWAB_DB_PASSWORD is required")
+        if not self.mcp_oauth_client_secret:
+            errors.append(
+                "MCP_OAUTH_CLIENT_SECRET is required (passphrase gating the "
+                "OAuth consent page); refusing to start with an open consent gate"
+            )
         return errors
 
 

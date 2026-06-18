@@ -20,8 +20,16 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def make_provider() -> SchwabMCPOAuthProvider:
-    return SchwabMCPOAuthProvider(server_url="https://mcp.example.com")
+CONSENT_SECRET = "correct-horse-battery-staple"
+
+
+def make_provider(
+    mcp_oauth_secret: str = CONSENT_SECRET,
+) -> SchwabMCPOAuthProvider:
+    return SchwabMCPOAuthProvider(
+        server_url="https://mcp.example.com",
+        mcp_oauth_secret=mcp_oauth_secret,
+    )
 
 
 def make_client(client_id: str = "test-client") -> OAuthClientInformationFull:
@@ -46,8 +54,13 @@ def make_auth_params(
     )
 
 
-async def make_consent_request(state: str, action: str = "approve") -> Request:
-    body = f"state={state}&action={action}".encode()
+async def make_consent_request(
+    state: str, action: str = "approve", secret: str | None = CONSENT_SECRET
+) -> Request:
+    parts = [f"state={state}", f"action={action}"]
+    if secret is not None:
+        parts.append(f"secret={secret}")
+    body = "&".join(parts).encode()
     scope = {
         "type": "http",
         "method": "POST",
@@ -146,6 +159,81 @@ class TestAuthorization:
         provider = make_provider()
         response = run(provider.get_consent_page("bad-state"))
         assert response.status_code == 400
+
+    def test_consent_page_includes_passphrase_field(self):
+        provider = make_provider()
+        client = make_client()
+        run(provider.register_client(client))
+
+        params = make_auth_params()
+        url = run(provider.authorize(client, params))
+        state = url.split("state=")[1]
+
+        response = run(provider.get_consent_page(state))
+        assert b'name="secret"' in response.body
+        assert b'type="password"' in response.body
+
+
+class TestConsentPassphraseGate:
+    def _authorize_to_state(self, provider: SchwabMCPOAuthProvider) -> str:
+        client = make_client()
+        run(provider.register_client(client))
+        params = make_auth_params()
+        url = run(provider.authorize(client, params))
+        return url.split("state=")[1]
+
+    def test_correct_passphrase_issues_code(self):
+        provider = make_provider()
+        state = self._authorize_to_state(provider)
+
+        request = run(make_consent_request(state, "approve", CONSENT_SECRET))
+        response = run(provider.handle_consent(request))
+
+        assert response.status_code == 302
+        assert len(provider._auth_codes) == 1
+
+    def test_wrong_passphrase_rejected_no_code(self):
+        provider = make_provider()
+        state = self._authorize_to_state(provider)
+
+        request = run(make_consent_request(state, "approve", "wrong-passphrase"))
+        response = run(provider.handle_consent(request))
+
+        assert response.status_code == 401
+        assert len(provider._auth_codes) == 0
+        # State preserved so the user can retry
+        assert state in provider._state_mapping
+
+    def test_missing_passphrase_rejected_no_code(self):
+        provider = make_provider()
+        state = self._authorize_to_state(provider)
+
+        request = run(make_consent_request(state, "approve", secret=None))
+        response = run(provider.handle_consent(request))
+
+        assert response.status_code == 401
+        assert len(provider._auth_codes) == 0
+
+    def test_unconfigured_secret_fails_closed(self):
+        provider = make_provider(mcp_oauth_secret="")
+        state = self._authorize_to_state(provider)
+
+        request = run(make_consent_request(state, "approve", "anything"))
+        response = run(provider.handle_consent(request))
+
+        assert response.status_code == 403
+        assert len(provider._auth_codes) == 0
+
+    def test_deny_does_not_require_passphrase(self):
+        provider = make_provider()
+        state = self._authorize_to_state(provider)
+
+        request = run(make_consent_request(state, "deny", secret=None))
+        response = run(provider.handle_consent(request))
+
+        assert response.status_code == 302
+        assert len(provider._auth_codes) == 0
+        assert "error=access_denied" in response.headers["location"]
 
 
 class TestCodeExchange:
