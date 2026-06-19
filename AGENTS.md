@@ -5,6 +5,12 @@
 - This is a **fork** of `jkoelker/schwab-mcp`. Never create PRs against the upstream repo.
 - Always target `ratio-yolo/schwab-mcp` when creating PRs (use `--repo ratio-yolo/schwab-mcp` or rely on the `gh repo set-default`).
 
+## Code Review
+
+- **agent1** is the code reviewer for this repository. Request review from agent1 on new PRs.
+- Do not add automated GitHub Actions review bots to this repo. The previous
+  `dobbyphus` reviewer workflow (`.github/workflows/agent.yaml`) has been removed.
+
 ## Project Structure
 
 ```
