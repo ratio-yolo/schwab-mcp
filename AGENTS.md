@@ -5,11 +5,36 @@
 - This is a **fork** of `jkoelker/schwab-mcp`. Never create PRs against the upstream repo.
 - Always target `ratio-yolo/schwab-mcp` when creating PRs (use `--repo ratio-yolo/schwab-mcp` or rely on the `gh repo set-default`).
 
-## Code Review
+## Code Review (agent1)
 
-- **agent1** is the code reviewer for this repository. Request review from agent1 on new PRs.
-- Do not add automated GitHub Actions review bots to this repo. The previous
-  `dobbyphus` reviewer workflow (`.github/workflows/agent.yaml`) has been removed.
+This repo is reviewed by **agent1**, an external autonomous reviewer that lives
+in `ratio-yolo/agent1`. Review/merge logic runs **there**, not here — this is a
+"zero-YAML" target repo.
+
+- **Do NOT add review/governance/auto-merge workflows to `.github/workflows/`.**
+  The legacy `dobbyphus` workflow (`.github/workflows/agent.yaml`) was removed
+  for this reason. Only first-party CI lives here (`ci.yml`, `container.yml`).
+- Two GitHub Apps power agent1 (both installed on this repo):
+  - `agent1-control-plane` (builder) — pushes `agent/*` branches; never
+    comments, labels, approves, or merges.
+  - `agent1-governor` (App ID `3421865`) — posts the review verdict, merges
+    approved PRs, and dispatches `review.yml` in `ratio-yolo/agent1`.
+- **Merge gate:** the branch ruleset *"Agent1 reviewer gate"* requires the
+  `merge-eligible` status check. That check is published only by agent1's
+  governance run (Gemini review → Claude governance → auto-merge). CI passing
+  is necessary but not sufficient; a PR stays `BLOCKED` until `merge-eligible`
+  is green. Do not delete the ruleset or remove `agent1-governor` /
+  `gittaylor` as bypass actors.
+- **What triggers a review:** a webhook → the agent1 webhook-router auto-runs
+  `review.yml` **only for `agent/issue-*` / `agent/task-*` branches**. PRs from
+  any other branch (e.g. human `fix/*`, `chore/*`) are **not** auto-reviewed and
+  will sit `BLOCKED` on `merge-eligible`. For those, either `gittaylor` (a
+  bypass actor) merges manually, or trigger a review explicitly:
+
+  ```bash
+  gh workflow run review.yml --repo ratio-yolo/agent1 \
+    -f repo_full=ratio-yolo/schwab-mcp -f pr_number=<N> -f head_sha=<SHA>
+  ```
 
 ## Project Structure
 
