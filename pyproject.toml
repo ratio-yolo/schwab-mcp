@@ -84,4 +84,4 @@ reportMissingImports = false
 typeCheckingMode = "basic"
 
 [tool.uv.sources]
-schwab-py = { git = "https://github.com/jkoelker/schwab-py.git", rev = "fef17718b811b88dcf5391f1d0cf1b39c12c0236" }
+schwab-py = { git = "https://github.com/jkoelker/schwab-py.git", rev = "a55cb29e9c9110e42b9744bde2e1d1dfccfc7589" }
